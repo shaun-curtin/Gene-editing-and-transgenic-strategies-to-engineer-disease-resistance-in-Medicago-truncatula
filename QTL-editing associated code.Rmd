@@ -1,0 +1,379 @@
+---
+title: "QTL-editing associated code"
+output:
+    rmdformats::readthedown:
+    code_folding: hide
+    self_contained: true
+    number_sections: False
+    highlight: pygments
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+<style type="text/css">
+
+body{ /* Normal  */
+   font-size: 14px;
+}
+td {  /* Table  */
+   font-size: 8px;
+}
+h1 { /* Header 1 */
+ font-size: 28px;
+ color: DarkBlue;
+}
+h2 { /* Header 2 */
+ font-size: 20px;
+ color: DarkBlue;
+}
+h3 { /* Header 3 */
+ font-size: 16px;
+ color: DarkBlue;
+}
+code.r{ /* Code block */
+  font-size: 12px;
+}
+pre { /* Code block */
+  font-size: 12px
+}
+</style>
+
+-------------
+
+## README {.tabset .tabset-fade .tabset-pills}
+
+### notes
+```{bash,k167, eval=FALSE}
+Manuscript:
+"Employing gene-editing and transgenic strategies to engineer disease resistance in Medicago truncatula"
+
+File location:
+https://github.com/shaun-curtin/Gene-editing-and-transgenic-strategies-to-engineer-disease-resistance-in-Medicago-truncatula
+
+```
+
+
+## SNP dendrogram across QTL regions  {.tabset .tabset-fade .tabset-pills}
+
+### R code
+```{bash,k1, eval=FALSE}
+# Produce a dendrogram bases on SNP data between M. truncatula accessions in the VCF file. 
+
+#Modules 
+library(SNPRelate)
+library(gdsfmt)
+library(ggtree)
+library(ape) 
+library(ggplot2)
+
+#Input data
+setwd("/Users/jakebotkin/Desktop/")
+vcf.fn<-"qtl_snps.vcf"
+
+#VCF->GDS
+snpgdsVCF2GDS(vcf.fn, "test2.gds", method="biallelic.only")
+snpgdsSummary("test2.gds")
+
+#Preparing the data so it is formatted correctly to create a dissimilarity matrix.
+gds_formatted <- snpgdsOpen("test2.gds")
+
+#Making the code reproducible
+set.seed(100)
+
+#Identity-By-State (IBS) analysis on genotypes to calc correlations
+ibs_Exon2010_03 <- snpgdsHCluster(snpgdsIBS(gds_formatted,num.thread=2, autosome.only=FALSE))
+?snpgdsHCluster
+?snpgdsCutTree
+#Determine groups by permutation 
+rvExon2010_03 <- snpgdsCutTree(ibs_Exon2010_03, col.outlier="red", label.H=TRUE, label.Z=TRUE)
+rvExon2010_03
+
+#Saving the dendrograms to new Variables
+treeExon2010_03 = rvExon2010_03$dendrogram
+
+#Plot tree1
+tree1<-snpgdsDrawTree(rvExon2010_03, main="title", 
+               edgePar=list(col=rgb(0.5,0.5,0.5, 0.75), t.col="black"))
+tree1
+
+
+#Plot Z scores
+z<-snpgdsDrawTree(rvExon2010_03, type="z-score", main="HapMap Phase II")
+z
+
+#Plot
+tree2<- plot(treeExon2010_03,horiz=T, main ="SNP dendrogram")
+tree2
+
+#Converting dendrograms to class hclust and to new variables
+hcExon2010_03 = as.hclust(treeExon2010_03)
+
+#Making the hclust object into a phylo object in ape
+thisExon2010_03 <- as.phylo(hcExon2010_03) 
+
+#Plot
+tree3 = ggtree(thisExon2010_03,color='darkgreen', ladderize=TRUE)+
+  geom_tiplab(size=3.5)+
+  ggtitle("SNP dendrogram")+geom_text(aes(label=node), hjust=-.3)
+tree3
+
+tree3 = ggtree(thisExon2010_03, layout='dendrogram',color='darkgreen', ladderize=TRUE,right= TRUE, branch.length="branch.length")+
+  geom_tiplab(size=3.5, aes(angle=angle))+
+  ggtitle("SNP dendrogram")
+tree3
+
+tree4 = ggtree(as.phylo(as.hclust(treeExon2010_03)), layout='circular',color='darkgreen', ladderize=TRUE,right= TRUE, branch.length="branch.length")+
+  geom_tiplab(size=2.5, aes(angle=angle))+
+  ggtitle("SNP dendrogram")
+tree4
+
+```
+
+
+## Reagent construction  {.tabset .tabset-fade .tabset-pills}
+
+### Steps
+```{bash,k12, eval=FALSE}
+# A custom python script to generate gRNA primers from known gRNA target sequences 
+1. Make a 6 line input text file (No spaces before or after text, PAM optional)
+
+    Input file example:
+    ----------------------
+    Gene_ID 
+    >gRNA_name
+    ACGATGATGATGACAAGGAC AGG
+    Gene_ID 
+    >gRNA_name
+    CAGTAGTACCCAGTATGACA TGG
+    ------------------------
+
+2. Download the grna_primers.py python script: 
+
+3. Run the python script from command line:
+    
+   python grna_primers.py 
+   
+   [Enter input file name on command line]
+
+
+4. Output: 
+    1 file named "gRNA_primers_gene_gRNA_date"
+    file contains: primers for each gRNA for IDT Bulk Input primer ordering
+    
+    1 file named "gRNA_primer_TAG_gene_gRNA_date"
+    file contains: gRNA name, gene, primers, and TAG insert sequence for Geneious Prime vector assembly. 
+
+5. Evaluate off targets with Cas-OFFinder v2.4
+```
+
+### Python code for grna_primers.py
+```{bash,k17, eval=FALSE}
+'''
+   #Open infile 
+
+infile_name= input("Enter input file name:  ")
+infile= open(infile_name,'rt') 
+    #Get date for output file name 
+import time
+date= time.strftime("%Y%m%d")
+date=date[0:8]
+    #Make lists to fill
+name=[]
+grna=[]
+rc=[]
+revcomp=[]
+c=[]
+comp=[]
+f_primer=[]
+r_primer=[]
+tag_insert=[]
+genename=[]
+info=[]
+print('\n'," ","Computing primer sequences...",'\n')
+print("File created",'\n')
+    #Loop through infile and put into in lists
+for line in infile:
+    line = line.rstrip()
+        #If header line has >, then save as gRNA name 
+    if line[0] == ">":
+        line.split(">")
+        name.append(line[1:])
+    if line[0] != ">":
+        info.append(line[0:]) 
+    #if line is DNA then save as gRNA sequence 
+for item in info: 
+    count= item.count("A")+item.count("C")+item.count("G")+item.count("T")
+    if count > 10:
+        grna.append(item) 
+        #If not then save as gene name 
+    else:
+        genename.append(item)
+    #Open outfile
+print(" ","Computing TAG insert sequences...",'\n')
+print("File created",'\n')
+outfile=open("gRNA_primers_"+genename[0]+"_"+name[0]+"_"+date,'wt')
+outfile2=open("gRNA_primer_TAG_"+genename[0]+"_"+name[0]+"_"+date,'wt')
+outfile3=open("gRNA_TAG_inserts_"+genename[0]+"_"+name[0]+"_"+date,'wt')
+for ind, seq in enumerate(grna): 
+    seq
+    seq=seq.split(" ")
+    seq=seq[0]
+        #Complement the gRNA sequence
+    c=seq.translate(str.maketrans("ACGT","TGCA"))
+    comp.append(c)
+    f_primer.append("tgca"+seq)
+        #Reverse the complement of gRNA sequence
+    rc= c[::-1]
+    revcomp.append(rc)
+    r_primer.append("aaac"+rc)
+        #TAG inserts for gRNA sequence
+    tag_insert.append("TCGTCTCCtgca"+seq+"gtttTGAGACG")
+        #Make primer and TAG file 
+    print("Primers and TAG insert for target","["+genename[ind]+"]:",'\n',">"+name[ind],'\n',"gRNA sequence ", \
+            '\t','\t'," "," ", grna[ind],'\n',name[ind]+"-F",'\t','\t',f_primer[ind],\
+                  '\n',name[ind]+"-R",'\t','\t',r_primer[ind],'\n',"TAG insert"," ",\
+                      tag_insert[ind],'\n',file=outfile2) 
+        #Make primer  file     
+    print(name[ind]+"-F",'\t',f_primer[ind],'\n',name[ind]+"-R",'\t',r_primer[ind],file=outfile) 
+    print(">"+name[ind],'\n',tag_insert[ind],'\n',file=outfile3) 
+print("Done!",'\n')
+infile.close()
+outfile.close()
+outfile2.close()   
+'''
+```
+
+
+### Evaluate offtargets
+```{bash,k122, eval=FALSE}
+# Download Cas-OFFinder v2.4 onto MSI using conda environment
+module load miniforge
+mamba create -n cas-offinder -c bioconda cas-offinder -y
+source activate cas-offinder
+
+#make 4 line input text file (input.txt)
+----------------------------------
+full/path/to/r108/genome
+NNNNNNNNNNNNNNNNNNNNNGG
+GAAGCCACTGATTCAATTGGGGG	5
+GGATGCTTACCTCCTGACCATGG	5
+----------------------------------
+
+#run program
+module load miniforge
+cas-offinder input.txt G output.txt
+
+
+```
+
+
+## Amplicon sequencing and mutant genotyping  {.tabset .tabset-fade .tabset-pills}
+
+### Base-calling 
+```{bash,k1222, eval=FALSE}
+# 1. Base calling 
+#####################
+#!/bin/bash -l
+#SBATCH --time=1:00:00
+#SBATCH --ntasks=4
+#SBATCH --tmp=2g
+#SBATCH -p v100
+#SBATCH --gres=gpu:v100:1
+#SBATCH --mail-type=ALL
+#SBATCH --job-name=dorado.sh
+
+# how to submit job:  sbatch -p v100 dorado.sh 
+
+#load module
+module load dorado/0.5.1
+
+#base calling
+dorado basecaller hac pod5/ > all_reads.dorado.bam \
+--kit-name SQK-RBK114-96 \
+--recursive
+#####################
+```
+
+
+### De-multiplex
+```{bash,k1234522, eval=FALSE}
+# 2. De-multiplex and convert to .fastq
+#####################
+#!/bin/bash -l
+#SBATCH --time=1:00:00
+#SBATCH --ntasks=4
+#SBATCH --tmp=2g
+#SBATCH -p v100
+#SBATCH --gres=gpu:v100:1
+#SBATCH --mail-type=ALL
+#SBATCH --job-name=demux.sh
+
+# how to submit job:  sbatch -p v100 demux.sh
+
+#load module
+module load dorado/0.5.1 
+
+dorado demux --output-dir ~/nanopore/ --emit-fastq --kit-name SQK-RBK114-96 all_reads.dorado.bam
+#####################
+```
+
+### Plot reads
+```{bash,k1345222, eval=FALSE}
+# Install nanoplot 
+# module load miniforge
+# mamba create -n nanoplot -c bioconda nanoplot -y
+# source activate nanoplot
+
+# Load module
+source activate nanoplot
+
+# Plot reads
+######################
+#!/bin/bash -l
+#SBATCH -N 1
+#SBATCH -n 5
+#SBATCH --time=1:00:00      
+#SBATCH --mail-type=ALL
+#SBATCH --job-name=nanoplot.sh
+#SBATCH --mem=1G  
+
+#how to submit job:  sbatch --array [1-33] nanoplot.sh
+
+#load module
+module load python
+source activate nanoplot
+conda activate nanoplot
+
+#location of list file with sample names
+LINE=$(sed -n "$SLURM_ARRAY_TASK_ID"p samples.txt)
+
+NanoPlot --N50 --fastq SQK-RBK114-96_${LINE}.fastq --prefix ${LINE}.nanoplot
+```
+
+### Filter reads 
+```{bash,k12435622, eval=FALSE}
+#!/bin/bash -l
+#SBATCH -N 1
+#SBATCH -n 5
+#SBATCH --time=1:00:00      
+#SBATCH --mail-type=ALL
+#SBATCH --job-name=nanofilt.sh
+#SBATCH --mem=1G  
+
+#how to submit job:  sbatch --array [1-33] nanofilt.sh
+
+#load module
+module load python
+
+#location of list file with sample names
+LINE=$(sed -n "$SLURM_ARRAY_TASK_ID"p samples.txt)
+
+#filter reads for (90% accurate)
+filtlong --max_length 1000 --min_length 100 --min_mean_q 99 SQK-RBK114-96_${LINE}.fastq > ${LINE}.q90.ts.fastq
+```
+
+
+
+
+
